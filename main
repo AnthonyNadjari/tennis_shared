@@ -1,467 +1,282 @@
+import pandas as pd
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 import os
 import time
 from datetime import datetime, timedelta
-import subprocess
-import sys
 
 # Configuration
-DAY = '27'
-TARGET_HOURS = 19  # 7 PM
-TARGET_MINUTES = 0
-USERNAME = 'anthonadj'
-PASSWORD = 'SorLouise2!'
+day = '27'
+hours = 19  # 7 PM
+minutes = 0
 
 
-class TennisCourtBooker:
-    def __init__(self):
-        self.driver = None
-        self.wait = None
+def timer(t):
+    target_time = datetime.strptime(t, "%H:%M").replace(
+        year=datetime.now().year,
+        month=datetime.now().month,
+        day=datetime.now().day
+    )
+    now = datetime.now()
+    wait_seconds = (target_time - now).total_seconds()
+    if wait_seconds > 0:
+        time.sleep(wait_seconds)
 
-    def setup_chrome_driver(self):
-        """Setup Chrome driver with proper macOS configuration"""
-        print("🔧 Setting up Chrome driver for macOS...")
 
-        # Chrome options for better stability
-        chrome_options = Options()
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.page_load_strategy = 'eager'
+# Setup Chrome
+service = Service(executable_path=r'C:\Users\x01376312\Downloads\chromedriver.exe')
+options = webdriver.ChromeOptions()
+options.page_load_strategy = 'eager'
+driver = webdriver.Chrome(service=service, options=options)
+wait = WebDriverWait(driver, 10)
 
-        # Try different ways to initialize ChromeDriver
-        driver_paths = [
-            # If ChromeDriver is in PATH
-            None,
-            # Common Homebrew installation
-            '/opt/homebrew/bin/chromedriver',
-            '/usr/local/bin/chromedriver',
-            # User's Downloads (fix the .exe extension issue)
-            '/Users/anthonadj/Downloads/chromedriver-mac-x64/chromedriver',
-            # Current directory
-            './chromedriver'
+
+def enter_data(xpath, keys):
+    wait.until(EC.visibility_of_element_located((By.XPATH, xpath)))
+    driver.find_element(By.XPATH, xpath).send_keys(keys, Keys.RETURN)
+
+
+def click_on(xpath):
+    wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
+    driver.find_element(By.XPATH, xpath).click()
+
+
+def check_slot_duration():
+    """Check if the selected slot has 1-hour option available"""
+    try:
+        time.sleep(1)  # Wait for booking page to load
+
+        # Find the select element
+        select_element = driver.find_element(By.ID, "booking-duration")
+        options = select_element.find_elements(By.TAG_NAME, "option")
+
+        print(f"ðŸ“‹ Found {len(options)} duration option(s)")
+
+        # If only one option, it's a 30-minute slot
+        if len(options) == 1:
+            print("â­ï¸ Only 30-minute slot available")
+            return False
+
+        # If we have multiple options, we can book 1 hour
+        print("âœ… Multiple duration options available - can book 1 hour")
+        return True
+
+    except Exception as e:
+        print(f"âš ï¸ Could not check duration: {e}")
+        return False
+
+
+def close_booking_modal():
+    """Close the booking modal to return to slot selection"""
+    try:
+        # Try different ways to close the modal
+        close_methods = [
+            # Try clicking outside the modal
+            lambda: driver.execute_script("document.querySelector('.modal-backdrop, .overlay').click()"),
+            # Try ESC key
+            lambda: driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE),
+            # Try close button
+            lambda: driver.find_element(By.CSS_SELECTOR, ".close, .modal-close, [data-dismiss='modal']").click(),
+            # Try cancel button
+            lambda: driver.find_element(By.XPATH,
+                                        "//button[contains(text(), 'Cancel') or contains(text(), 'Back')]").click()
         ]
 
-        for path in driver_paths:
+        for method in close_methods:
             try:
-                if path is None:
-                    # Let Selenium find ChromeDriver automatically
-                    self.driver = webdriver.Chrome(options=chrome_options)
-                else:
-                    if os.path.exists(path):
-                        service = Service(executable_path=path)
-                        self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                    else:
-                        continue
-
-                self.wait = WebDriverWait(self.driver, 10)
-                print("✅ Chrome driver initialized successfully")
-                return True
-
-            except WebDriverException as e:
-                print(f"⚠️ Failed to initialize with path: {path or 'auto'}")
+                method()
+                time.sleep(0.5)
+                # Check if modal is closed by looking for booking links again
+                if driver.find_elements(By.CSS_SELECTOR, "a.book-interval.not-booked"):
+                    print("âœ… Modal closed successfully")
+                    return True
+            except:
                 continue
 
-        print("❌ Could not initialize Chrome driver")
-        print("💡 Try installing ChromeDriver with: brew install chromedriver")
+        print("âš ï¸ Could not close modal with standard methods")
+        return False
+
+    except Exception as e:
+        print(f"âš ï¸ Error closing modal: {e}")
         return False
 
 
-    def safe_enter_data(self, xpath, text, timeout=10):
-        """Safely enter data with better error handling"""
-        try:
-            element = self.wait.until(EC.visibility_of_element_located((By.XPATH, xpath)))
-            element.clear()
-            element.send_keys(text)
-            return True
-        except TimeoutException:
-            print(f"⚠️ Timeout waiting for element: {xpath}")
-            return False
-        except Exception as e:
-            print(f"⚠️ Error entering data: {e}")
-            return False
-
-    def safe_click(self, xpath, timeout=10):
-        """Safely click element with better error handling"""
-        try:
-            element = self.wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-            element.click()
-            return True
-        except TimeoutException:
-            print(f"⚠️ Timeout waiting for clickable element: {xpath}")
-            return False
-        except Exception as e:
-            print(f"⚠️ Error clicking element: {e}")
-            return False
-
-    def safe_click_css(self, css_selector, timeout=10):
-        """Safely click element by CSS selector"""
-        try:
-            element = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, css_selector)))
-            element.click()
-            return True
-        except TimeoutException:
-            print(f"⚠️ Timeout waiting for CSS element: {css_selector}")
-            return False
-        except Exception as e:
-            print(f"⚠️ Error clicking CSS element: {e}")
-            return False
-
-    def login(self):
-        """Handle login process"""
-        print("🔐 Starting login process...")
-
-        login_url = "https://clubspark.lta.org.uk/SouthwarkPark/Account/SignIn?returnUrl=https%3a%2f%2fclubspark.lta.org.uk%2fSouthwarkPark%2fBooking%2fBookByDate"
-
-        try:
-            self.driver.get(login_url)
-            time.sleep(2)
-
-            # Click login button
-            if not self.safe_click('/html/body/div[3]/div[1]/div[2]/div[1]/div[2]/form/button'):
-                return False
-
-            time.sleep(1)
-
-            # Enter username
-            if not self.safe_enter_data('//*[@id="154:0"]', USERNAME):
-                return False
-
-            # Enter password and submit
-            if not self.safe_enter_data('//*[@id="input-2"]', PASSWORD):
-                return False
-
-            # Submit login form
-            password_field = self.driver.find_element(By.XPATH, '//*[@id="input-2"]')
-            password_field.send_keys(Keys.RETURN)
-
-            time.sleep(3)
-            print("✅ Login completed")
-            return True
-
-        except Exception as e:
-            print(f"❌ Login failed: {e}")
-            return False
-
-    def select_date(self):
-        """Select booking date"""
-        print(f"📅 Selecting day: {DAY}")
-
-        try:
-            # Click date picker
-            if not self.safe_click('//*[@id="book-by-date-view"]/div/div[1]/div/div[1]/button'):
-                return False
-
-            time.sleep(1)
-
-            # Find and click the specific day
-            dates = self.driver.find_elements(By.CSS_SELECTOR, 'td[data-handler="selectDay"]')
-            for date_element in dates:
-                if date_element.text == DAY:
-                    date_element.click()
-                    print("✅ Date selected")
-                    return True
-
-            print(f"❌ Could not find day {DAY}")
-            return False
-
-        except Exception as e:
-            print(f"❌ Date selection failed: {e}")
-            return False
-
-    def check_slot_duration(self):
-        """Check if selected slot has 1-hour option"""
-        try:
-            time.sleep(2)
-
-            select_element = self.driver.find_element(By.ID, "booking-duration")
-            options = select_element.find_elements(By.TAG_NAME, "option")
-
-            print(f"📋 Found {len(options)} duration option(s)")
-
-            if len(options) == 1:
-                print("⏭️ Only 30-minute slot available")
-                return False
-
-            print("✅ Multiple duration options available - can book 1 hour")
-            return True
-
-        except Exception as e:
-            print(f"⚠️ Could not check duration: {e}")
-            return False
-
-    def close_booking_modal(self):
-        """Close booking modal to return to slot selection"""
-        try:
-            # Try ESC key first (most reliable)
-            self.driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-            time.sleep(1)
-
-            # Check if we're back to slot selection
-            if self.driver.find_elements(By.CSS_SELECTOR, "a.book-interval.not-booked"):
-                print("✅ Modal closed with ESC key")
-                return True
-
-            # Try other close methods
-            close_selectors = [
-                ".close", ".modal-close", "[data-dismiss='modal']",
-                "button[aria-label='Close']", ".btn-close"
-            ]
-
-            for selector in close_selectors:
-                try:
-                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
-                    element.click()
-                    time.sleep(1)
-                    if self.driver.find_elements(By.CSS_SELECTOR, "a.book-interval.not-booked"):
-                        print("✅ Modal closed")
-                        return True
-                except:
-                    continue
-
-            print("⚠️ Could not close modal")
-            return False
-
-        except Exception as e:
-            print(f"⚠️ Error closing modal: {e}")
-            return False
-
-    def find_and_book_slot(self):
-        """Main slot finding and booking logic"""
-        print("🔍 Starting slot search...")
-
-        # Refresh page to ensure clean state
-        self.driver.refresh()
-        time.sleep(2)
-
-        target_time_minutes = TARGET_HOURS * 60 + TARGET_MINUTES
-        hour_str = f"{TARGET_HOURS:02d}:{TARGET_MINUTES:02d}"
-        print(f"🎯 Looking for slot at {hour_str} ({target_time_minutes} minutes)")
-
-        # Wait until 19:59 to start booking
-
-        start_time = time.time()
-        max_duration = 5 * 60  # 5 minutes
-        attempt = 0
-
-        while time.time() - start_time < max_duration:
-            attempt += 1
-            elapsed = int(time.time() - start_time)
-            print(f"🔄 Attempt {attempt} (elapsed: {elapsed}s)")
-
-            try:
-                # Get all available booking links
-                booking_links = self.driver.find_elements(By.CSS_SELECTOR, "a.book-interval.not-booked")
-
-                if not booking_links:
-                    print("⚠️ No booking slots available")
-                    time.sleep(1)
-                    self.driver.refresh()
-                    time.sleep(2)
-                    continue
-
-                # Find slots at target time
-                target_slots = []
-                for link in booking_links:
-                    data_test_id = link.get_attribute('data-test-id') or ""
-                    if '|' in data_test_id:
-                        parts = data_test_id.split('|')
-                        if len(parts) >= 3:
-                            try:
-                                slot_time = int(parts[2])
-                                if slot_time == target_time_minutes:
-                                    target_slots.append(link)
-                            except ValueError:
-                                continue
-
-                print(f"🎯 Found {len(target_slots)} slot(s) at {hour_str}")
-
-                # Try each target slot
-                for i, slot in enumerate(target_slots):
-                    print(f"🔍 Checking slot {i + 1}/{len(target_slots)}")
-
-                    try:
-                        # Scroll to element and click
-                        self.driver.execute_script("arguments[0].scrollIntoView(true);", slot)
-                        time.sleep(0.5)
-                        slot.click()
-
-                        if self.check_slot_duration():
-                            print("✅ 1-hour slot confirmed! Proceeding with booking...")
-                            return True
-                        else:
-                            print(f"⏭️ Slot {i + 1} is 30-minute only")
-                            if not self.close_booking_modal():
-                                print("⚠️ Modal close failed, refreshing...")
-                                self.driver.refresh()
-                                time.sleep(2)
-                                break
-                            time.sleep(1)
-
-                    except Exception as e:
-                        print(f"⚠️ Error with slot {i + 1}: {e}")
-                        continue
-
-                if target_slots:
-                    print(f"❌ All {len(target_slots)} slots at {hour_str} are 30-minute only")
-
-                # Refresh and try again
-                remaining = max_duration - (time.time() - start_time)
-                if remaining > 5:
-                    print(f"🔄 Refreshing... ({int(remaining)}s remaining)")
-                    self.driver.refresh()
-                    time.sleep(2)
-                else:
-                    break
-
-            except Exception as e:
-                print(f"⚠️ Search error: {e}")
-                time.sleep(1)
-
-        print(f"❌ No suitable slot found at {hour_str}")
-        return False
-
-    def complete_booking(self):
-        """Complete the booking process"""
-        print("📝 Completing booking...")
-
-        try:
-            # Select 1-hour duration
-            if not self.safe_click('/html/body/div[8]/div/div/div/div[1]/form/div[1]/div[1]/div[2]/div/div/div/span'):
-                return False
-
-            time.sleep(1)
-
-            # Select 1-hour option
-            if not self.safe_click('/html/body/span/span/span[2]/ul/li[2]'):
-                return False
-
-            time.sleep(1)
-
-            # Submit booking
-            if not self.safe_click('//*[@id="submit-booking"]'):
-                return False
-
-            time.sleep(2)
-            print("✅ Booking submitted, proceeding to payment...")
-            return True
-
-        except Exception as e:
-            print(f"❌ Booking completion failed: {e}")
-            return False
-
-    def proceed_to_payment(self):
-        """Navigate to payment but stop before entering sensitive data"""
-        print("💳 Proceeding to payment page...")
-
-        try:
-            # Click pay now
-            if not self.safe_click('//*[@id="paynow"]'):
-                return False
-
-            time.sleep(3)
-
-            print("⚠️  PAYMENT PAGE REACHED")
-            print("🛑 STOPPING AUTOMATION FOR SECURITY")
-            print("💡 Please complete payment manually in the browser")
-            print("🔍 The browser will remain open for you to complete the transaction")
-
-            # Keep browser open
-            input("Press Enter after completing payment manually...")
-            return True
-
-        except Exception as e:
-            print(f"❌ Payment navigation failed: {e}")
-            return False
-
-    def run(self):
-        """Main execution function"""
-        print("🎾 Tennis Court Booking Bot Starting...")
-
-        if not self.setup_chrome_driver():
-            return False
-
-        try:
-            # Execute booking flow
-            if not self.login():
-                return False
-
-            if not self.select_date():
-                return False
-
-            if not self.find_and_book_slot():
-                return False
-
-            if not self.complete_booking():
-                return False
-
-            # Stop at payment for security
-            self.proceed_to_payment()
-
-            print("✅ Booking process completed!")
-            return True
-
-        except KeyboardInterrupt:
-            print("\n⚠️ Process interrupted by user")
-            return False
-        except Exception as e:
-            print(f"❌ Unexpected error: {e}")
-            return False
-        finally:
-            print("🔒 Keeping browser open for manual completion")
-            # Don't quit driver automatically - let user complete payment
-
-    def cleanup(self):
-        """Clean up resources"""
-        if self.driver:
-            self.driver.quit()
-            print("✅ Browser closed")
-
-
-def check_chromedriver_installation():
-    """Check if ChromeDriver is properly installed"""
-    print("🔍 Checking ChromeDriver installation...")
-
-    try:
-        result = subprocess.run(['chromedriver', '--version'],
-                                capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            print(f"✅ ChromeDriver found: {result.stdout.strip()}")
-            return True
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    print("❌ ChromeDriver not found in PATH")
-    print("💡 Install with: brew install chromedriver")
-    print("💡 Or download from: https://chromedriver.chromium.org/")
-    return False
-
-
-if __name__ == "__main__":
-    # Check prerequisites
-    check_chromedriver_installation()
-
-    # Run the booking bot
-    booker = TennisCourtBooker()
-    try:
-        success = booker.run()
-        if success:
-            print("🎉 Booking process completed successfully!")
+try:
+    ## Login
+    print("ðŸ” Starting login process...")
+    driver.get(
+        r"https://clubspark.lta.org.uk/SouthwarkPark/Account/SignIn?returnUrl=https%3a%2f%2fclubspark.lta.org.uk%2fSouthwarkPark%2fBooking%2fBookByDate")
+    click_on('/html/body/div[3]/div[1]/div[2]/div[1]/div[2]/form/button')
+    enter_data('//*[@id="154:0"]', 'anthonadj')
+    enter_data('//*[@id="input-2"]', 'SorLouise2!')
+    print("âœ… Login completed")
+
+    ## Select date
+    print(f"ðŸ“… Selecting day: {day}")
+    click_on('//*[@id="book-by-date-view"]/div/div[1]/div/div[1]/button')
+    dates = driver.find_elements(By.CSS_SELECTOR, 'td[data-handler="selectDay"]')
+    for d in dates:
+        if d.text == day:
+            d.click()
+            break
+    print("âœ… Date selected")
+
+    ### COURT FINDING WITH RETRY LOGIC ###
+    driver.refresh()
+
+    # Just wait for any booking elements to appear (or not)
+    time.sleep(1)  # Quick wait for refresh
+
+    # Calculate target time in minutes
+    target_time_minutes = hours * 60 + minutes
+    hour_str = f"{hours:02d}:{minutes:02d}"
+    print(f"ðŸ” Looking for slot at {hour_str} ({target_time_minutes} minutes)")
+
+    # Retry logic - max 5 minutes
+    start_time = time.time()
+    max_duration = 5 * 60  # x hours in seconds
+    attempt = 0
+    slot_found = False
+    timer("19:59")
+
+    while time.time() - start_time < max_duration:
+        attempt += 1
+        elapsed = int(time.time() - start_time)
+        print(f"ðŸ”„ Attempt {attempt} (elapsed: {elapsed}s)")
+
+        # Get all available booking links
+        booking_links = driver.find_elements(By.CSS_SELECTOR, "a.book-interval.not-booked")
+        if not booking_links or len(booking_links)==0:
+            print("âš ï¸ No booking slots available on page")
         else:
-            print("❌ Booking process failed")
-    except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
-    finally:
-        # Only cleanup if user confirms
-        response = input("Close browser? (y/N): ").lower()
-        if response == 'y':
-            booker.cleanup()
+            # Find all slots at target time
+            target_slots = []
+            for link in booking_links:
+                data_test_id = link.get_attribute('data-test-id') or ""
+                if '|' in data_test_id:
+                    parts = data_test_id.split('|')
+                    if len(parts) >= 3:
+                        try:
+                            slot_time = int(parts[2])
+                            if slot_time == target_time_minutes:
+                                target_slots.append(link)
+                        except:
+                            continue
+
+            print(f"ðŸŽ¯ Found {len(target_slots)} slot(s) at {hour_str}")
+
+            # Try each slot at the target time
+            for i, slot in enumerate(target_slots):
+                print(f"ðŸ” Checking slot {i + 1}/{len(target_slots)}")
+
+                try:
+                    slot.click()
+                    print("âœ… Slot clicked, checking duration...")
+
+                    if check_slot_duration():
+                        print("âœ… 1-hour slot confirmed!")
+                        slot_found = True
+                        break
+                    else:
+                        print(f"â­ï¸ Slot {i + 1} is 30-minute, closing modal...")
+                        if close_booking_modal():
+                            print("âœ… Modal closed, trying next slot...")
+                            time.sleep(0.5)  # Brief pause before trying next slot
+                        else:
+                            print("âš ï¸ Could not close modal, refreshing page...")
+                            driver.refresh()
+                            time.sleep(1)
+                            break  # Break from slot loop to refresh
+
+                except Exception as e:
+                    print(f"âš ï¸ Error with slot {i + 1}: {e}")
+                    continue
+
+            if slot_found:
+                break  # Exit the main retry loop
+
+            if len(target_slots) > 0:
+                print(f"âŒ All {len(target_slots)} slots at {hour_str} are 30-minute slots")
+
+        # If no suitable slot found and still have time, refresh and try again
+        remaining_time = max_duration - (time.time() - start_time)
+        if remaining_time > 5:
+            print(f"ðŸ”„ Refreshing page to look for new slots... ({int(remaining_time)}s remaining)")
+            driver.refresh()
+            time.sleep(1)
+        else:
+            print("â° Time limit reached, stopping search")
+            break
+
+    # Check if slot was found
+    if not slot_found:
+        print(f"âŒ No slot found for {hour_str} after 5 minutes")
+        driver.quit()
+        exit()
+
+    click_on('/html/body/div[8]/div/div/div/div[1]/form/div[1]/div[1]/div[2]/div/div/div/span')
+    click_on('/html/body/span/span/span[2]/ul/li[2]')
+    click_on('//*[@id="submit-booking"]')
+    click_on('//*[@id="paynow"]')
+    time.sleep(0.5)
+    enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '5354562794845156')
+    enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '0430')
+    enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '')
+    enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '666')
+
+    try:
+        print("ðŸ’³ Attempting to submit payment...")
+        click_on('//*[@id="cs-stripe-elements-submit-button"]')
+        print("âœ… Payment button clicked successfully")
+
+        # Wait and check what happens
+        for i in range(10):  # Check for 10 seconds
+            time.sleep(0.5)
+            current_url = driver.current_url
+            print(f"â° Second {i + 1}: Current URL: {current_url}")
+
+            # Check if we're on a success/confirmation page
+            if "success" in current_url.lower() or "confirmation" in current_url.lower() or "thank" in current_url.lower():
+                print("ðŸŽ‰ Payment appears successful - on confirmation page!")
+                break
+
+            # Check if still on payment page
+            if "payment" in current_url.lower() or "stripe" in current_url.lower():
+                print("âš ï¸ Still on payment page...")
+
+            # Check page content for success messages
+            page_source = driver.page_source.lower()
+            if "booking confirmed" in page_source or "payment successful" in page_source:
+                print("ðŸŽ‰ Success message found on page!")
+                time.sleep(5)
+                break
+
+        print("ðŸŽ‰ Booking process completed!")
+
+    except Exception as e:
+        print(f"âŒ Payment submission error: {e}")
+        # Take a screenshot to see what's happening
+        try:
+            driver.save_screenshot("payment_error.png")
+            print("ðŸ“¸ Screenshot saved as payment_error.png")
+        except:
+            pass
+
+except Exception as e:
+    print(f"âŒ Error occurred: {e}")
+finally:
+    # driver.quit()
+    print("âœ… Browser closed")
