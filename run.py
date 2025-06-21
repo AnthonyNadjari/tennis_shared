@@ -227,15 +227,15 @@ try:
     enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '')
     enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '')
     enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '')
-    enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '5354562794845156')
+    enter_data('//*[@id="cs-stripe-elements-card-number"]/div/iframe', '99999999')
     enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '')
     enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '')
     enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '')
-    enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '0430')
+    enter_data('//*[@id="cs-stripe-elements-card-expiry"]/div/iframe', '9999')
     enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '')
     enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '')
     enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '')
-    enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '666')
+    enter_data('//*[@id="cs-stripe-elements-card-cvc"]/div/iframe', '999')
 
     try:
         print("💳 Attempting to submit payment...")
